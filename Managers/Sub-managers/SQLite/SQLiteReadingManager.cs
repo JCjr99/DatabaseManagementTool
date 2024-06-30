@@ -4,12 +4,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace DatabaseManagementTool.Managers.Sub_managers
+namespace DatabaseManagementTool
 {
-    public class DBDataRetriever
+    public class SQLiteReadingManager :IDBReadingManager
     {
-        private readonly DBConnectionManager connectionManager;
-        public DBDataRetriever(DBConnectionManager connectionManager)
+        private readonly SQLiteConnectionManager connectionManager;
+        public SQLiteReadingManager(SQLiteConnectionManager connectionManager)
         {
             this.connectionManager = connectionManager;
         }
