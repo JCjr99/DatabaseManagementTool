@@ -1,17 +1,19 @@
-﻿using System;
+﻿
+using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace DatabaseManagementTool.Managers.Sub_managers
+namespace DatabaseManagementTool
 {
-    public class DBDataInserter
+    public class SQLiteCreationManager : IDBCreationManager
     {
-        private readonly DBConnectionManager connectionManager;
+        private readonly SQLiteConnectionManager connectionManager;
 
-        public DBDataInserter(DBConnectionManager connectionManager)
+        public SQLiteCreationManager(SQLiteConnectionManager connectionManager)
         {
             this.connectionManager = connectionManager;
         }
@@ -57,6 +59,23 @@ namespace DatabaseManagementTool.Managers.Sub_managers
                 }
             }
         }
+
+        public async Task CreateTableAsync(Type type, CancellationToken cancellationToken = default)
+        {
+            using (var connection = connectionManager.CreateConnection())
+            {
+                var command = connection.CreateCommand();
+                string tableName = type.Name;
+                string columns = GetColumns(type);
+
+                columns = $"Id INTEGER PRIMARY KEY AUTOINCREMENT, Guid TEXT NOT NULL UNIQUE, {columns}";
+
+                string query = $"CREATE TABLE IF NOT EXISTS {tableName} ({columns})";
+
+                command.CommandText = query;
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
         //change to use connection manager
         private async Task<bool> TableExistsAsync(SQLiteConnection connection, string tableName, CancellationToken cancellationToken)
         {
@@ -79,7 +98,7 @@ namespace DatabaseManagementTool.Managers.Sub_managers
 
             foreach (var property in properties)
             {
-                if (DBManagerHelper.IsComplexType(property.PropertyType))
+                if (IsComplexType(property.PropertyType))
                 {
                     var nestedObject = property.GetValue(obj);
                     var nestedGuid = await InsertObjectAsync(nestedObject, cancellationToken);
@@ -96,5 +115,52 @@ namespace DatabaseManagementTool.Managers.Sub_managers
 
             return parameters;
         }
+
+        private bool IsComplexType(Type type)
+        {
+            return type.IsClass && type != typeof(string);
+        }
+
+        
+        private string GetColumns(Type type)
+        {
+            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var columns = new List<string>();
+
+            foreach (var property in properties)
+            {
+                if (IsComplexType(property.PropertyType))
+                {
+                    columns.Add($"{property.Name}_Id TEXT NOT NULL UNIQUE");
+                }
+                else
+                {
+                    string columnType = GetSqliteColumnType(property.PropertyType);
+                    columns.Add($"{property.Name} {columnType}");
+                }
+            }
+            return string.Join(", ", columns);
+        }
+
+        private string GetSqliteColumnType(Type type)
+        {
+            if (type == typeof(int) || type == typeof(long) || type == typeof(short))
+                return "INTEGER";
+            else if (type == typeof(float) || type == typeof(double))
+                return "REAL";
+            else if (type == typeof(string) || type == typeof(char))
+                return "TEXT";
+            else if (type == typeof(bool))
+                return "INTEGER";
+            else if (type == typeof(DateTime))
+                return "DATETIME";
+            else if (type.IsArray || type.IsGenericType)
+                return "BLOB";
+
+            return null;
+        }
+
+       
+
     }
 }
