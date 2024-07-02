@@ -12,44 +12,38 @@ namespace DatabaseManagementTool
     public class SQLiteCreationManager : IDBCreationManager
     {
         private readonly SQLiteConnectionManager connectionManager;
+        private readonly SQLiteCommandBuilder queryBuilder;   
 
         public SQLiteCreationManager(SQLiteConnectionManager connectionManager)
         {
             this.connectionManager = connectionManager;
+            this.queryBuilder = new SQLiteCommandBuilder();
         }
 
-        public async Task<Guid> InsertObjectAsync(object obj, CancellationToken cancellationToken = default)
+        public async Task InsertObjectAsync(object obj, CancellationToken cancellationToken = default)
         {
             using (var connection = connectionManager.CreateConnection())
             using (var transaction = connection.BeginTransaction())
             {
                 try
                 {
-                    var command = connection.CreateCommand();
-                    command.Transaction = transaction;
-                    var type = obj.GetType();
-                    var tableName = type.Name;
-
-                    if (!await TableExistsAsync(connection, tableName, cancellationToken))
+                   
+                   
+                    var commands = await queryBuilder.GetSQLiteCommands(transaction, obj, "INSERT", cancellationToken);
+                    foreach (SQLiteCommand command in commands)
                     {
-                        throw new InvalidOperationException($"Table '{tableName}' does not exist.");
+                        //needs changed to get name from command
+                        string tableName = obj.GetType().Name;
+                        if (!await TableExistsAsync(transaction, tableName, cancellationToken))
+                        {
+                            await CreateTableAsync(obj.GetType(), cancellationToken);
+                        }
+                        await command.ExecuteNonQueryAsync(cancellationToken);
                     }
 
-                    var parameters = await GetParametersAsync(obj, cancellationToken);
-
-                    var query = $"INSERT INTO {tableName} ({string.Join(", ", parameters.Keys)}) VALUES ({string.Join(", ", parameters.Keys.Select(k => $"@{k}"))})";
-
-                    command.CommandText = query;
-
-                    foreach (var parameter in parameters)
-                    {
-                        command.Parameters.AddWithValue($"@{parameter.Key}", parameter.Value);
-                    }
-
-                    await command.ExecuteNonQueryAsync(cancellationToken);
                     transaction.Commit();
 
-                    return Guid.Parse(parameters["Guid"].ToString());
+                    
                 }
                 catch (Exception ex)
                 {
@@ -76,11 +70,11 @@ namespace DatabaseManagementTool
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
         }
-        //change to use connection manager
-        private async Task<bool> TableExistsAsync(SQLiteConnection connection, string tableName, CancellationToken cancellationToken)
+        
+        private async Task<bool> TableExistsAsync(SQLiteTransaction transaction, string tableName, CancellationToken cancellationToken)
         {
             var query = "SELECT name FROM sqlite_master WHERE type='table' AND name=@tableName";
-            using (var command = new SQLiteCommand(query, connection))
+            using (var command = new SQLiteCommand(query, transaction.Connection))
             {
                 command.Parameters.AddWithValue("@tableName", tableName);
                 using (var reader = await command.ExecuteReaderAsync(cancellationToken))
@@ -88,37 +82,6 @@ namespace DatabaseManagementTool
                     return reader.HasRows;
                 }
             }
-        }
-
-        private async Task<Dictionary<string, object>> GetParametersAsync(object obj, CancellationToken cancellationToken)
-        {
-            var parameters = new Dictionary<string, object>();
-
-            var properties = obj.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
-            foreach (var property in properties)
-            {
-                if (IsComplexType(property.PropertyType))
-                {
-                    var nestedObject = property.GetValue(obj);
-                    var nestedGuid = await InsertObjectAsync(nestedObject, cancellationToken);
-
-                    parameters.Add($"{property.Name}_Id", nestedGuid.ToString());
-                }
-                else
-                {
-                    parameters.Add(property.Name, property.GetValue(obj) ?? DBNull.Value);
-                }
-            }
-
-            parameters.Add("Guid", Guid.NewGuid().ToString("D"));
-
-            return parameters;
-        }
-
-        private bool IsComplexType(Type type)
-        {
-            return type.IsClass && type != typeof(string);
         }
 
         
@@ -141,7 +104,10 @@ namespace DatabaseManagementTool
             }
             return string.Join(", ", columns);
         }
-
+        private bool IsComplexType(Type type)
+        {
+            return type.IsClass && type != typeof(string);
+        }
         private string GetSqliteColumnType(Type type)
         {
             if (type == typeof(int) || type == typeof(long) || type == typeof(short))

@@ -8,7 +8,7 @@ namespace DatabaseManagementTool
 {
     public interface IDBCreationManager
     {
-        Task<Guid> InsertObjectAsync(object obj, CancellationToken cancellationToken = default);
+        Task InsertObjectAsync(object obj, CancellationToken cancellationToken = default);
         Task CreateTableAsync(Type type, CancellationToken cancellationToken = default);
 
     }
